@@ -180,7 +180,7 @@ main() {
 
     step "Installation terminée !"
     echo -e "Pour lancer votre machine virtuelle, ouvrez un ${GREEN}NOUVEAU TERMINAL${NC} et tapez :"
-    echo -e "${GREEN}emulator @$AVD_NAME${NC}"
+    echo -e "${GREEN}$SDK_ROOT_DIR/emulator/emulator @$AVD_NAME${NC}"
 }
 
 main
