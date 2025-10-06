@@ -166,6 +166,11 @@ create_avd() {
 
     echo "no" | "$SDK_ROOT_DIR/cmdline-tools/latest/bin/avdmanager" create avd -n "$AVD_NAME" -k "${SYSTEM_IMAGE}"
     success "AVD '$AVD_NAME' créée."
+
+    step "Activation du clavier physique pour l'AVD..."
+    # Append the keyboard setting. The emulator uses the last entry for a given key.
+    echo "hw.keyboard=yes" >> "$HOME/.android/avd/$AVD_NAME.avd/config.ini"
+    success "Clavier physique activé."
 }
 
 # --- Exécution Principale ---
