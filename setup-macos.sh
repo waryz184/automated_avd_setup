@@ -3,29 +3,43 @@
 # Arrête le script si une commande échoue
 set -e
 
-# --- Variables et Constantes ---
-BLUE="\033[1;34m"
-GREEN="\033[1;32m"
-NC="\033[0m" # No Color
+# --- Gum Styles ---
+gum style --border normal --margin "1" --padding "1 2" --border-foreground 212 "Automated AVD Setup pour macOS"
 
-ANDROID_VERSION_INPUT=$1
-AVD_NAME=""
-PLATFORM_VERSION=""
-SYSTEM_IMAGE=""
-
+# --- Variables Globales ---
 SDK_ROOT_DIR="$(pwd)/sdk"
-ANDROID_HOME_VAR="export ANDROID_HOME=\"$SDK_ROOT_DIR\""
 
 # --- Fonctions ---
 
+# Vérifie la présence de Gum et demande son installation si absent
+require_gum() {
+    if ! command -v gum >/dev/null 2>&1;
+ then
+        echo "Erreur: 'gum' n'est pas installé."
+        echo "Cet outil est nécessaire pour l'interface interactive."
+        if command -v brew >/dev/null 2>&1;
+ then
+            if gum confirm "Voulez-vous installer 'gum' avec Homebrew ?"; then
+                brew install gum
+            else
+                echo "Installation annulée."
+                exit 1
+            fi
+        else
+            echo "Veuillez installer 'gum' manuellement pour continuer."
+            exit 1
+        fi
+    fi
+}
+
 # Affiche un message d'étape
 step() {
-    echo -e "\n${BLUE}==> $1${NC}"
+    gum style --foreground 33 "==> $1"
 }
 
 # Affiche un message de succès
 success() {
-    echo -e "${GREEN}✓ $1${NC}"
+    gum style --foreground 40 "✓ $1"
 }
 
 # Vérifie la présence d'une commande
@@ -33,52 +47,11 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
-# Valide l'argument d'entrée et configure les variables de version
-validate_input() {
-    step "Validation de la version d'Android..."
-    if [ -z "$ANDROID_VERSION_INPUT" ]; then
-        echo "Erreur : Vous devez spécifier une version d'Android."
-        echo "Usage: ./setup.sh <version>"
-        echo "Versions supportées: 13, 14, 15, 16"
-        exit 1
-    fi
-
-    case $ANDROID_VERSION_INPUT in
-        13)
-            PLATFORM_VERSION="33"
-            ;;
-        14)
-            PLATFORM_VERSION="34"
-            ;;
-        15)
-            # L'API level pour Android 15 est 35
-            PLATFORM_VERSION="35"
-            ;;
-        16)
-            # L'API level pour Android 16 sera probablement 36
-            PLATFORM_VERSION="36"
-            ;;
-        *)
-            echo "Erreur : Version '$ANDROID_VERSION_INPUT' non supportée."
-            exit 1
-            ;;
-    esac
-
-    AVD_NAME="android-${ANDROID_VERSION_INPUT}-vm"
-    # Détection de l'architecture pour Apple Silicon (arm64) vs Intel (x86_64)
-    ARCH=$(uname -m)
-    if [ "$ARCH" = "arm64" ]; then
-        SYSTEM_IMAGE="system-images;android-${PLATFORM_VERSION};google_apis;arm64-v8a"
-    else
-        SYSTEM_IMAGE="system-images;android-${PLATFORM_VERSION};google_apis;x86_64"
-    fi
-    success "Configuration pour Android $ANDROID_VERSION_INPUT (API $PLATFORM_VERSION) sur arch $ARCH."
-}
-
 # Vérifie les dépendances système comme Homebrew
 check_dependencies() {
     step "Vérification des dépendances..."
-    if ! command_exists brew; then
+    if ! command_exists brew;
+ then
         echo "Erreur : Homebrew n'est pas installé. Veuillez l'installer depuis https://brew.sh/"
         exit 1
     fi
@@ -87,15 +60,17 @@ check_dependencies() {
 
 # Installe Java via Homebrew si nécessaire
 install_java() {
-    if ! command_exists java; then
+    if ! command_exists java;
+ then
         step "Installation de Java (OpenJDK)..."
-        brew install openjdk
+        gum spin --spinner dot --title "Installation de OpenJDK via Homebrew..." -- brew install openjdk
         
-        # Homebrew nécessite une étape manuelle pour lier le JDK
-        echo -e "\n${BLUE}--- ACTION REQUISE ---${NC}"
-        echo "Pour finaliser l'installation de Java, veuillez exécuter la commande suivante dans un autre terminal :"
-        echo -e "${GREEN}sudo ln -sfn /opt/homebrew/opt/openjdk/libexec/openjdk.jdk /Library/Java/JavaVirtualMachines/openjdk.jdk${NC}"
-        read -p "Appuyez sur Entrée une fois que c'est fait..."
+        if [ "$(uname -m)" = "x86_64" ]; then
+            gum style --bold --foreground 212 "--- ACTION REQUISE ---"
+            echo "Pour finaliser l'installation de Java, veuillez exécuter la commande suivante :"
+            gum style --foreground 220 "sudo ln -sfn $(brew --prefix)/opt/openjdk/libexec/openjdk.jdk /Library/Java/JavaVirtualMachines/openjdk.jdk"
+            gum confirm "Appuyez sur Entrée une fois que c'est fait..."
+        fi
     fi
     success "Java est installé et configuré."
 }
@@ -107,17 +82,15 @@ install_sdk_tools() {
         return
     fi
     
-    step "Téléchargement des outils de ligne de commande du SDK Android..."
     local LATEST_URL="https://dl.google.com/android/repository/commandlinetools-mac-13114758_latest.zip"
     local ZIP_FILE="cmdline-tools.zip"
     
-    curl -L -o "$ZIP_FILE" "$LATEST_URL"
+    gum spin --spinner dot --title "Téléchargement des outils SDK..." -- curl -L -o "$ZIP_FILE" "$LATEST_URL"
     
     step "Organisation de la structure du SDK..."
     unzip -q "$ZIP_FILE" -d "$SDK_ROOT_DIR"
     rm "$ZIP_FILE"
     
-    # Crée la structure de dossier moderne attendue par sdkmanager
     mkdir -p "$SDK_ROOT_DIR/cmdline-tools"
     mv "$SDK_ROOT_DIR/cmdline-tools" "$SDK_ROOT_DIR/latest"
     mkdir "$SDK_ROOT_DIR/cmdline-tools"
@@ -133,25 +106,27 @@ setup_environment_variables() {
     
     if ! grep -q "ANDROID_HOME" "$ZSHRC_FILE"; then
         echo "Ajout des variables au fichier $ZSHRC_FILE..."
-        echo -e "\n# Android SDK Setup" >> "$ZSHRC_FILE"
-        echo "$ANDROID_HOME_VAR" >> "$ZSHRC_FILE"
-        echo 'export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"' >> "$ZSHRC_FILE"
-        echo 'export PATH="$ANDROID_HOME/platform-tools:$PATH"' >> "$ZSHRC_FILE"
-        echo 'export PATH="$ANDROID_HOME/emulator:$PATH"' >> "$ZSHRC_FILE"
+        {
+            echo -e "\n# Android SDK Setup"
+            echo "export ANDROID_HOME=\"$SDK_ROOT_DIR\""
+            echo 'export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"'
+            echo 'export PATH="$ANDROID_HOME/platform-tools:$PATH"'
+            echo 'export PATH="$ANDROID_HOME/emulator:$PATH"'
+        } >> "$ZSHRC_FILE"
         success "Variables d'environnement ajoutées."
-        echo "Veuillez ouvrir un nouveau terminal après la fin du script pour les utiliser."
+        gum style --bold "Veuillez ouvrir un nouveau terminal après la fin du script pour les utiliser."
     else
         success "Les variables d'environnement semblent déjà configurées."
     fi
 }
 
-# Installe les paquets Android nécessaires (émulateur, image système...)
+# Installe les paquets Android nécessaires
 install_android_packages() {
     step "Acceptation des licences du SDK..."
     yes | "$SDK_ROOT_DIR/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null
 
     step "Installation des paquets Android (cela peut prendre du temps)..."
-    "$SDK_ROOT_DIR/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "emulator" "platforms;android-${PLATFORM_VERSION}" "${SYSTEM_IMAGE}"
+    gum spin --spinner dot --title "Installation des paquets..." -- "$SDK_ROOT_DIR/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "emulator" "platforms;android-${PLATFORM_VERSION}" "${SYSTEM_IMAGE}"
 
     success "Paquets Android installés."
 }
@@ -160,22 +135,136 @@ install_android_packages() {
 create_avd() {
     step "Création de la machine virtuelle (AVD)..."
     if "$SDK_ROOT_DIR/cmdline-tools/latest/bin/avdmanager" list avd | grep -q "Name: $AVD_NAME"; then
-        success "L'AVD '$AVD_NAME' existe déjà."
-        return
+        if gum confirm "L'AVD '$AVD_NAME' existe déjà. Voulez-vous la recréer ?"; then
+            "$SDK_ROOT_DIR/cmdline-tools/latest/bin/avdmanager" delete avd -n "$AVD_NAME"
+        else
+            success "Création ignorée."
+            return
+        fi
     fi
 
-    echo "no" | "$SDK_ROOT_DIR/cmdline-tools/latest/bin/avdmanager" create avd -n "$AVD_NAME" -k "${SYSTEM_IMAGE}"
+    gum spin --spinner dot --title "Création de l'AVD '$AVD_NAME'..." -- echo "no" | "$SDK_ROOT_DIR/cmdline-tools/latest/bin/avdmanager" create avd -n "$AVD_NAME" -k "${SYSTEM_IMAGE}"
     success "AVD '$AVD_NAME' créée."
 
     step "Activation du clavier physique pour l'AVD..."
-    # Append the keyboard setting. The emulator uses the last entry for a given key.
     echo "hw.keyboard=yes" >> "$HOME/.android/avd/$AVD_NAME.avd/config.ini"
     success "Clavier physique activé."
 }
 
-# --- Exécution Principale ---
-main() {
-    validate_input
+# Supprime les AVDs sélectionnés par l'utilisateur
+delete_avd() {
+    step "Suppression d'AVDs existants..."
+    
+    if [ ! -d "$SDK_ROOT_DIR/cmdline-tools" ]; then
+        gum style --bold --foreground 203 "Le SDK Android n'est pas installé. Impossible de lister les AVDs."
+        echo "Veuillez d'abord exécuter l'installation."
+        exit 1
+    fi
+
+    AVD_LIST=$("$SDK_ROOT_DIR/cmdline-tools/latest/bin/avdmanager" list avd | grep "Name: " | sed 's/Name: //')
+
+    if [ -z "$AVD_LIST" ]; then
+        success "Aucun AVD trouvé."
+        exit 0
+    fi
+
+    gum style --bold "Sélectionnez les AVDs à supprimer (Espace pour sélectionner, Entrée pour confirmer):"
+    AVDS_TO_DELETE=$(echo "$AVD_LIST" | gum choose --no-limit)
+
+    if [ -z "$AVDS_TO_DELETE" ]; then
+        echo "Aucun AVD sélectionné. Annulation."
+        exit 0
+    fi
+
+    if gum confirm "Êtes-vous sûr de vouloir supprimer les AVDs suivants ?\n\n$AVDS_TO_DELETE"; then
+        echo "$AVDS_TO_DELETE" | while IFS= read -r avd_name;
+ do
+            step "Suppression de '$avd_name'..."
+            "$SDK_ROOT_DIR/cmdline-tools/latest/bin/avdmanager" delete avd -n "$avd_name"
+            success "'$avd_name' supprimé."
+        done
+    else
+        echo "Suppression annulée."
+    fi
+}
+
+# Lance un AVD sélectionné par l'utilisateur
+launch_avd() {
+    step "Lancement d'un AVD existant..."
+
+    if [ ! -d "$SDK_ROOT_DIR/cmdline-tools" ]; then
+        gum style --bold --foreground 203 "Le SDK Android n'est pas installé. Impossible de lister les AVDs."
+        echo "Veuillez d'abord exécuter l'installation."
+        exit 1
+    fi
+
+    AVD_LIST=$("$SDK_ROOT_DIR/cmdline-tools/latest/bin/avdmanager" list avd | grep "Name: " | sed 's/Name: //')
+
+    if [ -z "$AVD_LIST" ]; then
+        success "Aucun AVD trouvé à lancer."
+        exit 0
+    fi
+
+    gum style --bold "Sélectionnez un AVD à lancer :"
+    AVD_TO_LAUNCH=$(echo "$AVD_LIST" | gum choose)
+
+    if [ -n "$AVD_TO_LAUNCH" ]; then
+        step "Lancement de '$AVD_TO_LAUNCH' en arrière-plan..."
+        nohup "$SDK_ROOT_DIR/emulator/emulator" @"$AVD_TO_LAUNCH" >/dev/null 2>&1 &
+        success "'$AVD_TO_LAUNCH' est en cours de démarrage. Vous pouvez fermer ce terminal."
+    else
+        echo "Aucun AVD sélectionné. Annulation."
+    fi
+}
+
+# Logique d'installation complète
+run_installation() {
+    if ! gum confirm "Prêt à commencer l'installation de l'AVD Android ?"; then
+        echo "Installation annulée."
+        exit 0
+    fi
+
+    step "Configuration de votre AVD..."
+    ANDROID_VERSION_NAME=$(gum choose "Android 16 (Baklava)" "Android 15 (VanillaIceCream)" "Android 14 (UpsideDownCake)" "Android 13 (Tiramisu)")
+    
+    case $ANDROID_VERSION_NAME in
+        "Android 16 (Baklava)") PLATFORM_VERSION="36" ;; 
+        "Android 15 (VanillaIceCream)") PLATFORM_VERSION="35" ;; 
+        "Android 14 (UpsideDownCake)") PLATFORM_VERSION="34" ;; 
+        "Android 13 (Tiramisu)") PLATFORM_VERSION="33" ;; 
+    esac
+
+    gum style --bold "Choisissez un type d'image système :"
+    IMAGE_CHOICE=$(gum choose \
+        "Google Play (Recommandé: Inclut le Play Store et les services Google)" \
+        "Google APIs (Services Google, sans le Play Store)" \
+        "AOSP - Automated Testing (Android de base, sans services Google)" \
+        "Google APIs - Automated Testing (Services Google pour tests automatisés)")
+
+    case "$IMAGE_CHOICE" in
+        "Google Play (Recommandé: Inclut le Play Store et les services Google)") IMAGE_TYPE="google_apis_playstore" ;; 
+        "Google APIs (Services Google, sans le Play Store)") IMAGE_TYPE="google_apis" ;; 
+        "AOSP - Automated Testing (Android de base, sans services Google)") IMAGE_TYPE="aosp_atd" ;; 
+        "Google APIs - Automated Testing (Services Google pour tests automatisés)") IMAGE_TYPE="google_atd" ;; 
+    esac
+    
+    ARCH=$(uname -m)
+    if [ "$ARCH" = "arm64" ]; then
+        ARCH_SUFFIX="arm64-v8a"
+    else
+        ARCH_SUFFIX="x86_64"
+    fi
+    
+    SYSTEM_IMAGE="system-images;android-${PLATFORM_VERSION};${IMAGE_TYPE};${ARCH_SUFFIX}"
+    
+    gum style --bold "Nom de l'AVD: "
+    AVD_NAME=$(gum input --placeholder "android-${PLATFORM_VERSION}-vm")
+    if [ -z "$AVD_NAME" ]; then
+        AVD_NAME="android-${PLATFORM_VERSION}-vm"
+    fi
+
+    gum style --border double --padding "1" "Configuration choisie :" "API Level: ${PLATFORM_VERSION}" "Image: ${SYSTEM_IMAGE}" "Nom AVD: ${AVD_NAME}"
+
     check_dependencies
     install_java
     install_sdk_tools
@@ -184,8 +273,23 @@ main() {
     create_avd
 
     step "Installation terminée !"
-    echo -e "Pour lancer votre machine virtuelle, ouvrez un ${GREEN}NOUVEAU TERMINAL${NC} et tapez :"
-    echo -e "${GREEN}$SDK_ROOT_DIR/emulator/emulator @$AVD_NAME${NC}"
+    gum style --bold --foreground 40 "Pour lancer votre machine virtuelle, ouvrez un NOUVEAU TERMINAL et tapez :"
+    echo "$SDK_ROOT_DIR/emulator/emulator @$AVD_NAME"
+}
+
+# --- Exécution Principale ---
+main() {
+    require_gum
+    
+    ACTION=$(gum choose "Installer un nouvel AVD" "Lancer un AVD existant" "Supprimer des AVDs existants")
+
+    if [ "$ACTION" = "Installer un nouvel AVD" ]; then
+        run_installation
+    elif [ "$ACTION" = "Lancer un AVD existant" ]; then
+        launch_avd
+    elif [ "$ACTION" = "Supprimer des AVDs existants" ]; then
+        delete_avd
+    fi
 }
 
 main

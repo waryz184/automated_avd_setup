@@ -49,9 +49,9 @@ function Validate-Input {
     
     $arch = $env:PROCESSOR_ARCHITECTURE
     if ($arch -eq 'ARM64') {
-        $systemImage = "system-images;android-$platformVersion;google_apis;arm64-v8a"
+        $systemImage = "system-images;android-$platformVersion;google_apis_playstore;arm64-v8a"
     } elseif ($arch -eq 'AMD64') {
-        $systemImage = "system-images;android-$platformVersion;google_apis;x86_64"
+        $systemImage = "system-images;android-$platformVersion;google_apis_playstore;x86_64"
     } else {
         Write-Error "Architecture non supportée: $arch"
     }
